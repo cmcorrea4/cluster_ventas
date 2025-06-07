@@ -1,5 +1,3 @@
-# cluster_ventas
-
 # 🤖 Clasificación de Clientes con Algoritmos de IA
 
 Una aplicación web desarrollada en Streamlit que permite segmentar clientes usando múltiples algoritmos de Machine Learning para estrategias de marketing y ventas personalizadas.
