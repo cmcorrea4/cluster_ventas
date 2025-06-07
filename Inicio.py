@@ -1,30 +1,21 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.decomposition import PCA
-from sklearn.metrics import silhouette_score
-import seaborn as sns
-import matplotlib.pyplot as plt
+from sklearn.metrics import silhouette_score, calinski_harabasz_score
+import warnings
+warnings.filterwarnings('ignore')
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Segmentación de Clientes",
-    page_icon="👥",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Clasificación de Clientes con IA",
+    page_icon="🤖",
+    layout="wide"
 )
 
-# Título principal
-st.title("🎯 Segmentación de Clientes con Machine Learning")
-st.markdown("### Análisis y clustering de clientes para estrategias de ventas personalizadas")
-
-# Sidebar para configuraciones
-st.sidebar.header("⚙️ Configuraciones")
+st.title("🤖 Clasificación de Clientes con Algoritmos de IA")
 
 # Función para cargar datos
 @st.cache_data
@@ -34,296 +25,176 @@ def cargar_datos(archivo):
 # Función para preprocesar datos
 @st.cache_data
 def preprocesar_datos(df):
-    # Crear una copia para no modificar el original
     df_proc = df.copy()
     
     # Codificar variables categóricas
-    le_categoria = LabelEncoder()
-    le_canal = LabelEncoder()
-    le_programa = LabelEncoder()
-    le_region = LabelEncoder()
+    categorical_columns = ['categoria_productos', 'canal_preferido', 'programa_lealtad', 'region']
     
-    df_proc['categoria_productos_encoded'] = le_categoria.fit_transform(df_proc['categoria_productos'])
-    df_proc['canal_preferido_encoded'] = le_canal.fit_transform(df_proc['canal_preferido'])
-    df_proc['programa_lealtad_encoded'] = le_programa.fit_transform(df_proc['programa_lealtad'])
-    df_proc['region_encoded'] = le_region.fit_transform(df_proc['region'])
+    for col in categorical_columns:
+        if col in df_proc.columns:
+            le = LabelEncoder()
+            df_proc[f'{col}_encoded'] = le.fit_transform(df_proc[col].astype(str))
     
-    return df_proc, le_categoria, le_canal, le_programa, le_region
+    return df_proc
 
-# Función para realizar clustering
-@st.cache_data
-def realizar_clustering(df, columnas_seleccionadas, n_clusters):
-    # Seleccionar solo las columnas numéricas para clustering
-    X = df[columnas_seleccionadas]
-    
-    # Escalar los datos
+# Función para aplicar algoritmos de clustering/clasificación
+def aplicar_algoritmo(df, columnas, algoritmo, parametros):
+    X = df[columnas]
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
-    # Aplicar K-means
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    clusters = kmeans.fit_predict(X_scaled)
-    
-    # Calcular score de silueta
-    silhouette_avg = silhouette_score(X_scaled, clusters)
-    
-    return clusters, silhouette_avg, kmeans, scaler, X_scaled
+    try:
+        if algoritmo == "K-Means":
+            modelo = KMeans(n_clusters=parametros['n_clusters'], random_state=42)
+            clusters = modelo.fit_predict(X_scaled)
+            
+        elif algoritmo == "DBSCAN":
+            modelo = DBSCAN(eps=parametros['eps'], min_samples=parametros['min_samples'])
+            clusters = modelo.fit_predict(X_scaled)
+            
+        elif algoritmo == "Gaussian Mixture":
+            modelo = GaussianMixture(n_components=parametros['n_components'], random_state=42)
+            clusters = modelo.fit_predict(X_scaled)
+            
+        elif algoritmo == "Agglomerative Clustering":
+            modelo = AgglomerativeClustering(n_clusters=parametros['n_clusters'])
+            clusters = modelo.fit_predict(X_scaled)
+        
+        # Calcular métricas
+        metricas = {}
+        if len(set(clusters)) > 1:
+            metricas['silhouette'] = silhouette_score(X_scaled, clusters)
+            metricas['calinski_harabasz'] = calinski_harabasz_score(X_scaled, clusters)
+            metricas['n_clusters'] = len(set(clusters))
+            
+            if algoritmo == "DBSCAN":
+                metricas['ruido'] = np.sum(clusters == -1)
+        
+        return clusters, metricas
+        
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        return None, None
 
-# Sección de carga de archivo
+# Cargar datos
 st.header("📁 Cargar Dataset")
+archivo_cargado = st.file_uploader("Selecciona archivo CSV", type=['csv'])
 
-# Opción para usar dataset ejemplo o cargar archivo
-opcion_datos = st.radio(
-    "Selecciona el origen de los datos:",
-    ["Usar dataset de ejemplo", "Cargar archivo CSV"]
-)
-
-df = None
-
-if opcion_datos == "Usar dataset de ejemplo":
-    # Generar dataset de ejemplo
-    if st.button("Generar Dataset de Ejemplo"):
-        with st.spinner("Generando dataset..."):
-            # Aquí iría el código del generador anterior (simplificado para el ejemplo)
-            # Por simplicidad, crearemos un dataset básico
-            np.random.seed(42)
-            n_samples = 500
-            
-            data = {
-                'cliente_id': [f'C{i:04d}' for i in range(1, n_samples+1)],
-                'edad': np.random.randint(18, 70, n_samples),
-                'ingresos_anuales': np.random.randint(20000, 120000, n_samples),
-                'antiguedad_meses': np.random.randint(1, 60, n_samples),
-                'num_compras_ultimo_ano': np.random.randint(0, 30, n_samples),
-                'valor_total_compras': np.random.randint(50, 15000, n_samples),
-                'ticket_promedio': np.random.randint(20, 800, n_samples),
-                'dias_ultima_compra': np.random.randint(1, 365, n_samples),
-                'categoria_productos': np.random.choice(['Básico', 'Estándar', 'Premium'], n_samples),
-                'canal_preferido': np.random.choice(['Online', 'Tienda', 'Móvil'], n_samples),
-                'programa_lealtad': np.random.choice(['Si', 'No'], n_samples),
-                'descuentos_utilizados': np.random.randint(0, 15, n_samples),
-                'calificacion_servicio': np.random.randint(1, 5, n_samples),
-                'region': np.random.choice(['Norte', 'Sur', 'Centro'], n_samples)
-            }
-            
-            df = pd.DataFrame(data)
-            # Calcular variables derivadas
-            df['frecuencia_compra'] = df['num_compras_ultimo_ano'] / 12
-            df['valor_por_mes'] = df['valor_total_compras'] / df['antiguedad_meses']
-            df['recencia_score'] = np.where(df['dias_ultima_compra'] <= 30, 5,
-                                  np.where(df['dias_ultima_compra'] <= 60, 4,
-                                  np.where(df['dias_ultima_compra'] <= 90, 3,
-                                  np.where(df['dias_ultima_compra'] <= 180, 2, 1))))
-            
-            st.success("Dataset generado exitosamente!")
-            
-else:
-    archivo_cargado = st.file_uploader(
-        "Carga tu archivo CSV",
-        type=['csv'],
-        help="El archivo debe contener las columnas necesarias para el análisis"
+if archivo_cargado is not None:
+    df = cargar_datos(archivo_cargado)
+    st.success(f"Dataset cargado: {len(df)} filas, {len(df.columns)} columnas")
+    
+    # Mostrar vista previa
+    st.subheader("Vista previa de datos")
+    st.dataframe(df.head())
+    
+    # Preprocesar datos
+    df_procesado = preprocesar_datos(df)
+    
+    # Selección de variables
+    st.header("🔧 Configuración")
+    
+    columnas_numericas = df_procesado.select_dtypes(include=[np.number]).columns.tolist()
+    columnas_numericas = [col for col in columnas_numericas if 'id' not in col.lower()]
+    
+    columnas_seleccionadas = st.multiselect(
+        "Variables para clasificación:",
+        columnas_numericas,
+        default=columnas_numericas[:4] if len(columnas_numericas) >= 4 else columnas_numericas
     )
     
-    if archivo_cargado is not None:
-        df = cargar_datos(archivo_cargado)
-        st.success("Archivo cargado exitosamente!")
-
-# Si tenemos datos, proceder con el análisis
-if df is not None:
-    st.header("📊 Exploración de Datos")
+    # Selección de algoritmo
+    algoritmo = st.selectbox(
+        "Algoritmo de IA:",
+        ["K-Means", "DBSCAN", "Gaussian Mixture", "Agglomerative Clustering"]
+    )
     
-    # Mostrar información básica
-    col1, col2, col3, col4 = st.columns(4)
+    # Parámetros específicos por algoritmo
+    parametros = {}
     
-    with col1:
-        st.metric("Total Clientes", len(df))
-    with col2:
-        st.metric("Variables", len(df.columns))
-    with col3:
-        st.metric("Valor Total Ventas", f"${df['valor_total_compras'].sum():,.0f}")
-    with col4:
-        st.metric("Ticket Promedio", f"${df['ticket_promedio'].mean():.2f}")
+    if algoritmo == "K-Means":
+        parametros['n_clusters'] = st.slider("Número de clusters:", 2, 10, 4)
+        
+    elif algoritmo == "DBSCAN":
+        parametros['eps'] = st.slider("Epsilon (eps):", 0.1, 2.0, 0.5, 0.1)
+        parametros['min_samples'] = st.slider("Mínimo de muestras:", 2, 20, 5)
+        
+    elif algoritmo == "Gaussian Mixture":
+        parametros['n_components'] = st.slider("Número de componentes:", 2, 10, 4)
+        
+    elif algoritmo == "Agglomerative Clustering":
+        parametros['n_clusters'] = st.slider("Número de clusters:", 2, 10, 4)
     
-    # Mostrar muestra de datos
-    st.subheader("Vista previa de los datos")
-    st.dataframe(df.head(10))
-    
-    # Estadísticas descriptivas
-    if st.expander("Ver estadísticas descriptivas"):
-        st.write(df.describe())
-    
-    # Preprocesamiento
-    df_procesado, le_cat, le_canal, le_prog, le_region = preprocesar_datos(df)
-    
-    # Configuración del clustering
-    st.header("🔧 Configuración del Clustering")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Selección de variables para clustering
-        columnas_numericas = [
-            'edad', 'ingresos_anuales', 'antiguedad_meses', 'num_compras_ultimo_ano',
-            'valor_total_compras', 'ticket_promedio', 'dias_ultima_compra',
-            'frecuencia_compra', 'valor_por_mes', 'recencia_score',
-            'descuentos_utilizados', 'calificacion_servicio',
-            'categoria_productos_encoded', 'canal_preferido_encoded',
-            'programa_lealtad_encoded', 'region_encoded'
-        ]
-        
-        # Filtrar solo las columnas que existen en el dataframe
-        columnas_disponibles = [col for col in columnas_numericas if col in df_procesado.columns]
-        
-        columnas_seleccionadas = st.multiselect(
-            "Selecciona las variables para el clustering:",
-            columnas_disponibles,
-            default=['valor_total_compras', 'num_compras_ultimo_ano', 'ticket_promedio', 'dias_ultima_compra']
-        )
-    
-    with col2:
-        # Número de clusters
-        n_clusters = st.slider(
-            "Número de clusters:",
-            min_value=2,
-            max_value=10,
-            value=4,
-            help="Número de segmentos de clientes a crear"
-        )
-    
-    if columnas_seleccionadas:
-        # Realizar clustering
-        clusters, silhouette_score_val, modelo_kmeans, scaler, X_scaled = realizar_clustering(
-            df_procesado, columnas_seleccionadas, n_clusters
-        )
-        
-        # Agregar clusters al dataframe
-        df_con_clusters = df.copy()
-        df_con_clusters['Cluster'] = clusters
-        df_con_clusters['Cluster_Label'] = df_con_clusters['Cluster'].map({
-            0: 'Segmento A', 1: 'Segmento B', 2: 'Segmento C', 
-            3: 'Segmento D', 4: 'Segmento E'
-        })
-        
-        # Mostrar resultados
-        st.header("📈 Resultados del Clustering")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Score de Silueta", f"{silhouette_score_val:.3f}")
-        with col2:
-            st.metric("Clusters Creados", n_clusters)
-        
-        # Distribución de clusters
-        st.subheader("Distribución de Clientes por Segmento")
-        cluster_counts = df_con_clusters['Cluster_Label'].value_counts()
-        
-        fig_pie = px.pie(
-            values=cluster_counts.values,
-            names=cluster_counts.index,
-            title="Distribución de Clientes por Segmento"
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
-        
-        # Análisis de clusters
-        st.subheader("Análisis Detallado por Segmento")
-        
-        # Características promedio por cluster
-        cluster_analysis = df_con_clusters.groupby('Cluster_Label').agg({
-            'edad': 'mean',
-            'ingresos_anuales': 'mean',
-            'valor_total_compras': 'mean',
-            'num_compras_ultimo_ano': 'mean',
-            'ticket_promedio': 'mean',
-            'dias_ultima_compra': 'mean',
-            'calificacion_servicio': 'mean'
-        }).round(2)
-        
-        st.dataframe(cluster_analysis)
-        
-        # Visualizaciones
-        st.subheader("Visualizaciones de Segmentos")
-        
-        # PCA para visualización en 2D
-        if len(columnas_seleccionadas) > 2:
-            pca = PCA(n_components=2)
-            X_pca = pca.fit_transform(X_scaled)
-            
-            fig_pca = px.scatter(
-                x=X_pca[:, 0], y=X_pca[:, 1],
-                color=df_con_clusters['Cluster_Label'],
-                title="Visualización de Clusters (PCA)",
-                labels={'x': f'PC1 ({pca.explained_variance_ratio_[0]:.1%} varianza)',
-                       'y': f'PC2 ({pca.explained_variance_ratio_[1]:.1%} varianza)'}
+    # Ejecutar clasificación
+    if st.button("🚀 Ejecutar Clasificación") and columnas_seleccionadas:
+        with st.spinner("Procesando..."):
+            clusters, metricas = aplicar_algoritmo(
+                df_procesado, columnas_seleccionadas, algoritmo, parametros
             )
-            st.plotly_chart(fig_pca, use_container_width=True)
-        
-        # Gráfico de dispersión por variables seleccionadas
-        if len(columnas_seleccionadas) >= 2:
-            var1 = st.selectbox("Variable X:", columnas_seleccionadas)
-            var2 = st.selectbox("Variable Y:", [col for col in columnas_seleccionadas if col != var1])
             
-            fig_scatter = px.scatter(
-                df_con_clusters, x=var1, y=var2,
-                color='Cluster_Label',
-                title=f"Distribución de Clusters: {var1} vs {var2}",
-                hover_data=['cliente_id']
-            )
-            st.plotly_chart(fig_scatter, use_container_width=True)
-        
-        # Análisis de características por cluster
-        st.subheader("Perfiles de Segmentos")
-        
-        for i in range(n_clusters):
-            cluster_name = f"Segmento {chr(65+i)}"  # A, B, C, etc.
-            cluster_data = df_con_clusters[df_con_clusters['Cluster'] == i]
-            
-            with st.expander(f"{cluster_name} ({len(cluster_data)} clientes)"):
-                st.write(f"**Características principales del {cluster_name}:**")
+            if clusters is not None:
+                # Agregar resultados al dataframe
+                df_resultado = df.copy()
+                df_resultado['Cluster'] = clusters
+                df_resultado['Segmento'] = df_resultado['Cluster'].apply(
+                    lambda x: f'Segmento {x+1}' if x >= 0 else 'Ruido'
+                )
                 
+                # Mostrar resultados
+                st.header("📊 Resultados")
+                
+                # Métricas
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Edad promedio", f"{cluster_data['edad'].mean():.1f} años")
-                    st.metric("Ingresos promedio", f"${cluster_data['ingresos_anuales'].mean():,.0f}")
-                
+                    st.metric("Clusters encontrados", metricas.get('n_clusters', 0))
                 with col2:
-                    st.metric("Compras/año", f"{cluster_data['num_compras_ultimo_ano'].mean():.1f}")
-                    st.metric("Valor total", f"${cluster_data['valor_total_compras'].mean():,.0f}")
-                
+                    st.metric("Silhouette Score", f"{metricas.get('silhouette', 0):.3f}")
                 with col3:
-                    st.metric("Ticket promedio", f"${cluster_data['ticket_promedio'].mean():.0f}")
-                    st.metric("Días última compra", f"{cluster_data['dias_ultima_compra'].mean():.0f}")
-        
-        # Descargar resultados
-        st.header("💾 Descargar Resultados")
-        
-        csv_resultado = df_con_clusters.to_csv(index=False)
-        st.download_button(
-            label="Descargar dataset con clusters",
-            data=csv_resultado,
-            file_name="clientes_segmentados.csv",
-            mime="text/csv"
-        )
-        
-        # Recomendaciones estratégicas
-        st.header("💡 Recomendaciones Estratégicas")
-        
-        st.markdown("""
-        **Basado en la segmentación realizada, considera estas estrategias:**
-        
-        🎯 **Segmento de Alto Valor**: Programas VIP, productos premium, atención personalizada
-        
-        📈 **Segmento Frecuente**: Programas de lealtad, ofertas por volumen, comunicación regular
-        
-        🔔 **Segmento Ocasional**: Campañas de reactivación, ofertas especiales, recordatorios
-        
-        🆕 **Segmento Nuevo**: Onboarding, productos de entrada, seguimiento cercano
-        
-        ⚠️ **Segmento en Riesgo**: Campañas de retención, encuestas de satisfacción, ofertas personalizadas
-        """)
-
+                    if 'ruido' in metricas:
+                        st.metric("Puntos de ruido", metricas['ruido'])
+                    else:
+                        st.metric("Calinski-Harabasz", f"{metricas.get('calinski_harabasz', 0):.1f}")
+                
+                # Distribución de clusters
+                st.subheader("Distribución por Segmento")
+                distribucion = df_resultado['Segmento'].value_counts()
+                st.dataframe(distribucion)
+                
+                # Análisis por cluster
+                st.subheader("Análisis por Segmento")
+                variables_analisis = ['edad', 'ingresos_anuales', 'valor_total_compras', 
+                                    'num_compras_ultimo_ano', 'ticket_promedio']
+                variables_disponibles = [var for var in variables_analisis if var in df_resultado.columns]
+                
+                if variables_disponibles:
+                    analisis_clusters = df_resultado.groupby('Segmento')[variables_disponibles].mean().round(2)
+                    st.dataframe(analisis_clusters)
+                
+                # Visualización simple
+                if len(columnas_seleccionadas) >= 2:
+                    st.subheader("Visualización")
+                    var_x = columnas_seleccionadas[0]
+                    var_y = columnas_seleccionadas[1]
+                    
+                    chart_data = df_resultado[[var_x, var_y, 'Cluster']].copy()
+                    chart_data = chart_data.rename(columns={var_x: 'x', var_y: 'y'})
+                    
+                    st.scatter_chart(
+                        data=chart_data,
+                        x='x',
+                        y='y',
+                        color='Cluster'
+                    )
+                
+                # Descargar resultados
+                st.subheader("💾 Descargar")
+                csv_resultado = df_resultado.to_csv(index=False)
+                st.download_button(
+                    label="Descargar dataset clasificado",
+                    data=csv_resultado,
+                    file_name="clientes_clasificados.csv",
+                    mime="text/csv"
+                )
+                
 else:
-    st.info("Por favor, carga un dataset o genera uno de ejemplo para comenzar el análisis.")
-
-# Footer
-st.markdown("---")
-st.markdown("Desarrollado con ❤️ usando Streamlit y Scikit-learn")
+    st.info("Carga un archivo CSV para comenzar la clasificación.")
